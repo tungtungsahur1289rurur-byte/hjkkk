@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#070b14">
+<title>DINZXX GAME — Cyber Racing</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:#070b14;color:#eff8ff;font-family:Arial,Helvetica,sans-serif}body{text-align:center;background:radial-gradient(ellipse at top,#102642,#070b14 65%);padding:18px 10px}.wrap{max-width:460px;margin:auto}h1{margin:2px 0;color:#43ceff;font-size:clamp(30px,8vw,44px);letter-spacing:3px;text-shadow:0 0 22px #159cff66} .sub{margin:7px 0 16px;color:#8ea9c5;letter-spacing:3px;font-size:10px;font-weight:bold}.stats{display:flex;justify-content:center;gap:10px;margin:12px auto}.stat{background:#0d1929;border:1px solid #245072;border-radius:10px;padding:9px 20px;min-width:110px}.stat small{display:block;color:#8daac8;font-size:10px;letter-spacing:2px}.stat b{display:block;font-size:22px;color:#70e4ff;margin-top:4px}canvas{display:block;width:100%;height:min(56vh,520px);min-height:340px;background:#0a1421;border:1px solid #2877a7;border-radius:14px;box-shadow:0 0 35px #078cff20;touch-action:none}.buttons{display:flex;justify-content:center;align-items:center;gap:12px;margin:14px auto}.btn{border:1px solid #2c98cc;border-radius:12px;padding:14px 22px;background:#10233a;color:#e8f8ff;font-size:16px;font-weight:900;cursor:pointer;touch-action:manipulation}.primary{background:linear-gradient(100deg,#6ce8ff,#249fff);border:0;color:#04121e;min-width:210px}.steer{width:95px;font-size:25px;padding:14px 0;user-select:none}.note{color:#7893b0;font-size:12px;line-height:1.6}.status{min-height:22px;color:#7fe8ff;font-weight:bold;font-size:13px}.hide{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>DINZXX GAME</h1><div class="sub">/// CYBER RACING ///</div>
+<div class="stats"><div class="stat"><small>SCORE</small><b id="score">00000</b></div><div class="stat"><small>BEST</small><b id="best">00000</b></div></div>
+<canvas id="game" aria-label="Game balapan"></canvas>
+<div class="buttons" id="startRow"><button class="btn primary" id="start">▶ MULAI BALAP</button></div>
+<div class="buttons hide" id="controls"><button class="btn steer" id="left" aria-label="Kiri">◀</button><button class="btn steer" id="right" aria-label="Kanan">▶</button></div>
+<div class="status" id="status">Hindari mobil lawan dan kumpulkan skor!</div>
+<div class="buttons hide" id="endRow"><button class="btn primary" id="again">↻ MAIN LAGI</button><button class="btn" id="home">MENU</button></div>
+<p class="note">HP: gunakan tombol kiri/kanan. Laptop: gunakan tombol panah ← → atau A / D.<br>Semakin lama bertahan, semakin tinggi skor!</p>
+</div>
+<script>
+(()=>{
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+const $=id=>document.getElementById(id);
+let W=400,H=500,dpr=1,state='menu',player,traffic=[],score=0,best=0,speed=220,spawn=0,last=0,roadTick=0,keys={left:false,right:false};
+try{best=+(localStorage.getItem('dinzxx-racing-best')||0)}catch(e){}
+const fmt=n=>Math.floor(n).toString().padStart(5,'0');
+$('best').textContent=fmt(best);
+function resize(){
+ const r=canvas.getBoundingClientRect();dpr=Math.min(devicePixelRatio||1,2);W=r.width;H=r.height;
+ canvas.width=Math.floor(W*dpr);canvas.height=Math.floor(H*dpr);ctx.setTransform(dpr,0,0,dpr,0,0);
+ if(player){player.y=H*.77;player.x=Math.max(0,Math.min(W-player.w,player.x))}
+ draw();
+}
+addEventListener('resize',resize);
+function init(){
+ player={x:W/2-18,y:H*.77,w:36,h:59};traffic=[];score=0;speed=220;spawn=.5;roadTick=0;keys.left=keys.right=false;
+ $('score').textContent=fmt(0);$('status').textContent='Balapan dimulai! Hindari mobil lawan.';
+ $('startRow').classList.add('hide');$('endRow').classList.add('hide');$('controls').classList.remove('hide');
+ state='playing';last=performance.now();requestAnimationFrame(loop);
+}
+function road(){
+ const horizon=H*.06,rw=W*.78,rx=(W-rw)/2;
+ ctx.fillStyle='#0b1725';ctx.fillRect(0,0,W,H);
+ // subtle neon scenery
+ for(let i=0;i<20;i++){let y=(i*59+roadTick*.25)%(H+20);ctx.fillStyle=i%2?'#1d638a22':'#6ae5ff14';ctx.fillRect((i*71+13)%W,y,2,12)}
+ ctx.fillStyle='#202d3e';ctx.fillRect(rx,0,rw,H);
+ ctx.fillStyle='#2ccaff';ctx.shadowColor='#2ccaff';ctx.shadowBlur=9;ctx.fillRect(rx,0,3,H);ctx.fillRect(rx+rw-3,0,3,H);ctx.shadowBlur=0;
+ ctx.strokeStyle='#779bb9';ctx.lineWidth=2;ctx.setLineDash([24,23]);ctx.lineDashOffset=-roadTick*.13;
+ ctx.beginPath();ctx.moveTo(W/2,0);ctx.lineTo(W/2,H);ctx.stroke();ctx.setLineDash([]);
+ // road streaks
+ for(let i=0;i<10;i++){let y=(i*70+roadTick*.8)%(H+25);ctx.fillStyle='#68dfff25';ctx.fillRect(rx+15+(i*37)%(rw-30),y,2,14)}
+}
+function car(x,y,w,h,color,playerCar=false){
+ ctx.save();ctx.shadowColor=color;ctx.shadowBlur=playerCar?15:8;
+ ctx.fillStyle='#03070d';ctx.fillRect(x-3,y+8,5,14);ctx.fillRect(x+w-2,y+8,5,14);ctx.fillRect(x-3,y+h-22,5,14);ctx.fillRect(x+w-2,y+h-22,5,14);
+ let g=ctx.createLinearGradient(x,y,x+w,y);g.addColorStop(0,'#10273d');g.addColorStop(.5,color);g.addColorStop(1,'#10273d');
+ ctx.fillStyle=g;ctx.fillRect(x,y,w,h);ctx.shadowBlur=0;
+ ctx.fillStyle=playerCar?'#d9fbff':'#9cb8ce';ctx.fillRect(x+6,y+8,w-12,11);
+ ctx.fillStyle='#0a1827';ctx.fillRect(x+6,y+25,w-12,10);
+ ctx.fillStyle=playerCar?'#eaffff':'#ff435f';ctx.fillRect(x+4,y+2,7,4);ctx.fillRect(x+w-11,y+2,7,4);
+ ctx.restore();
+}
+function draw(){
+ ctx.setTransform(dpr,0,0,dpr,0,0);road();
+ traffic.forEach(t=>car(t.x,t.y,t.w,t.h,t.color));
+ if(player)car(player.x,player.y,player.w,player.h,'#24baff',true);
+ if(state==='menu'){
+  ctx.fillStyle='#dff8ff';ctx.textAlign='center';ctx.font='bold 14px Arial';ctx.fillText('READY TO RACE?',W/2,H*.37);
+  ctx.fillStyle='#8daac8';ctx.font='12px Arial';ctx.fillText('Tekan MULAI BALAP untuk bermain',W/2,H*.42);
+ }
+}
+function spawnCar(){
+ const rw=W*.78,rx=(W-rw)/2,w=Math.max(29,Math.min(38,W*.095)),lanes=[rx+rw/6-w/2,rx+rw/2-w/2,rx+rw*5/6-w/2];
+ const lane=Math.floor(Math.random()*3);
+ traffic.push({x:Math.max(rx+6,Math.min(rx+rw-w-6,lanes[lane])),y:-75,w,h:w*1.58,color:['#ff496c','#ffad42','#a78bfa','#35d99b'][Math.floor(Math.random()*4)],passed:false});
+}
+function finish(){
+ state='over';best=Math.max(best,Math.floor(score));try{localStorage.setItem('dinzxx-racing-best',best)}catch(e){}
+ $('best').textContent=fmt(best);$('status').textContent='GAME OVER — Skor kamu: '+Math.floor(score);
+ $('controls').classList.add('hide');$('endRow').classList.remove('hide');$('startRow').classList.add('hide');draw();
+}
+function loop(now){
+ if(state!=='playing')return;
+ const dt=Math.min((now-last)/1000||0,.04);last=now;score+=dt*12;speed=Math.min(470,220+score*.7);roadTick+=speed*dt;
+ const rx=(W-W*.78)/2,roadW=W*.78,minX=rx+6,maxX=rx+roadW-player.w-6;
+ if(keys.left)player.x-=250*dt;if(keys.right)player.x+=250*dt;player.x=Math.max(minX,Math.min(maxX,player.x));
+ spawn-=dt;if(spawn<=0){spawnCar();spawn=Math.max(.48,1.05-score/800)+Math.random()*.25}
+ for(const t of traffic){
+  t.y+=(speed+score*.12)*dt;
+  if(!t.passed&&t.y>player.y+player.h){t.passed=true;score+=25}
+  if(player.x+player.w-6>t.x+5&&player.x+6<t.x+t.w-5&&player.y+player.h-8>t.y+5&&player.y+8<t.y+t.h-5){finish();return}
+ }
+ traffic=traffic.filter(t=>t.y<H+80);
+ $('score').textContent=fmt(score);$('best').textContent=fmt(Math.max(best,score));draw();requestAnimationFrame(loop);
+}
+function bind(id,k){
+ const b=$(id);const down=e=>{e.preventDefault();keys[k]=true};const up=e=>{e.preventDefault();keys[k]=false};
+ b.addEventListener('pointerdown',down);['pointerup','pointercancel','pointerleave'].forEach(ev=>b.addEventListener(ev,up));
+}
+bind('left','left');bind('right','right');
+addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight',' '].includes(e.key))e.preventDefault();if(e.key==='ArrowLeft'||e.key.toLowerCase()==='a')keys.left=true;if(e.key==='ArrowRight'||e.key.toLowerCase()==='d')keys.right=true});
+addEventListener('keyup',e=>{if(e.key==='ArrowLeft'||e.key.toLowerCase()==='a')keys.left=false;if(e.key==='ArrowRight'||e.key.toLowerCase()==='d')keys.right=false});
+$('start').addEventListener('click',init);$('again').addEventListener('click',init);
+$('home').addEventListener('click',()=>{state='menu';player=null;traffic=[];$('endRow').classList.add('hide');$('startRow').classList.remove('hide');$('status').textContent='Hindari mobil lawan dan kumpulkan skor!';draw()});
+resize();draw();
+})();
+</script>
+</body>
+</html>
